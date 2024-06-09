@@ -43,7 +43,7 @@ from reslib.dnssec import key_cache, load_keys, validate_all
 from reslib.lookup import initialize_dnssec, resolve_name
 
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
@@ -52,6 +52,7 @@ DEFAULT_TIMEOUT = 4
 DEFAULT_RETRIES = 1
 DEFAULT_EDNS_BUFSIZE = 1420
 DEFAULT_IP_RRTYPES = [dns.rdatatype.AAAA, dns.rdatatype.A]
+DEFAULT_NSID = False
 DEFAULT_PERCENT_OK = 100
 
 
@@ -62,12 +63,12 @@ DEFAULT_PERCENT_OK = 100
 RESOLVER_LIST = ['8.8.8.8', '1.1.1.1']
 
 def query_type(qtype):
-    """Check qtype argument value is well formed"""
+    """Check qtype argument value is well formed and return value"""
     try:
-        dns.rdatatype.from_text(qtype)
+        result = dns.rdatatype.from_text(qtype)
     except Exception as catchall_except:
         raise ValueError(f"invalid query type: {qtype}") from catchall_except
-    return qtype.upper()
+    return result
 
 
 def process_arguments(arguments=None):
@@ -77,9 +78,9 @@ def process_arguments(arguments=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__description__,
         allow_abbrev=False)
-    parser.add_argument("zone", help="DNS zone name")
-    parser.add_argument("recname", help="Record name in the zone")
-    parser.add_argument("rectype", help="Record type for that name")
+    parser.add_argument("zone", help="DNS zone name", type=dns.name.from_text)
+    parser.add_argument("recname", help="Record name in the zone", type=dns.name.from_text)
+    parser.add_argument("rectype", help="Record type for that name", type=query_type)
 
     parser.add_argument("-v", "--verbose", action="count", default=0,
                         help="increase output verbosity")
@@ -99,6 +100,7 @@ def process_arguments(arguments=None):
                         default=DEFAULT_EDNS_BUFSIZE,
                         help="Set EDNS buffer size in octets (default: %(default)d)")
     parser.add_argument("--nsid", dest='nsid', action='store_true',
+                        default=DEFAULT_NSID,
                         help="Send and record NSID EDNS option")
     parser.add_argument("--dsdata",
                         default=None,
@@ -162,14 +164,15 @@ def send_query(
             return (response, False)
 
 
-def get_resolver(addresses=None, dnssec_ok=False, timeout=DEFAULT_TIMEOUT):
+def get_resolver(addresses=None, dnssec_ok=False, timeout=DEFAULT_TIMEOUT,
+                 payload=DEFAULT_EDNS_BUFSIZE):
     """return an appropriately configured Resolver object"""
 
     res = dns.resolver.Resolver()
     res.set_flags(dns.flags.RD | dns.flags.AD | dns.flags.CD)
     res.lifetime = timeout
     if dnssec_ok:
-        res.use_edns(edns=0, ednsflags=dns.flags.DO, payload=CONFIG.payload)
+        res.use_edns(edns=0, ednsflags=dns.flags.DO, payload=payload)
     if addresses is not None:
         res.nameservers = addresses
     return res
@@ -226,22 +229,24 @@ def get_addresses(resolver, name, ip_rrtypes):
     return address_list
 
 
-def get_response(rrname, rrtype, address):
+def get_response(rrname, rrtype, address,
+                 timeout=DEFAULT_TIMEOUT, retries=DEFAULT_RETRIES,
+                 payload=DEFAULT_EDNS_BUFSIZE, nsid=DEFAULT_NSID):
     """
     Query RRset at given address and return DNS response message and \
     possibly an error (e.g. a timeout).
     """
 
     options = []
-    if CONFIG.nsid:
+    if nsid:
         options.append(dns.edns.GenericOption(dns.edns.NSID, b''))
     msg = dns.message.make_query(rrname, rrtype, dns.rdataclass.IN,
                                  use_edns=True, want_dnssec=True,
-                                 options=options, payload=CONFIG.bufsize)
+                                 options=options, payload=payload)
     try:
         response, _ = send_query(msg, address,
-                                 timeout=CONFIG.timeout,
-                                 retries=CONFIG.retries)
+                                 timeout=timeout,
+                                 retries=retries)
     except dns.exception.Timeout:
         return None, "query timed out"
     return response, None
@@ -275,13 +280,15 @@ class ZoneChecker:
     result = {}              # result dictionary
     nslist = None            # list of nameserver names
 
-    def __init__(self, zonename, recname, rectype, dsdata=None):
+    def __init__(self, zonename, recname, rectype, config):
         self.name = zonename
         self.recname = recname
         self.rectype = rectype
-        self.resolver = get_resolver(addresses=CONFIG.resolvers, dnssec_ok=False)
-        if dsdata:
-            self.dsdata = get_ds_data_from_string(zonename, dsdata)
+        self.config = config
+        self.resolver = get_resolver(addresses=config.resolvers, dnssec_ok=False,
+                                     timeout=config.timeout, payload=config.bufsize)
+        if config.dsdata:
+            self.dsdata = get_ds_data_from_string(zonename, config.dsdata)
         else:
             self.dsdata = get_ds_data_from_dns(self.name)
         self.get_nameservers()
@@ -295,7 +302,7 @@ class ZoneChecker:
         self.result['rectype'] = dns.rdatatype.to_text(self.rectype)
         self.result['timestamp'] = None
         self.result['success'] = False
-        if CONFIG.verbose:
+        if self.config.verbose:
             self.result['dsdata'] = [str(x) for x in self.dsdata]
         self.result['server_count_total'] = 0
         self.result['server_count_good'] = 0
@@ -310,7 +317,7 @@ class ZoneChecker:
         """Check nameservers"""
         self.result['timestamp'] = time.strftime("%Y-%m-%dT%H:%M:%S%Z", time.gmtime(time.time()))
         for nsname in self.nslist:
-            alist = get_addresses(self.resolver, nsname, CONFIG.ip_rrtypes)
+            alist = get_addresses(self.resolver, nsname, self.config.ip_rrtypes)
             for nsaddress in alist:
                 self.result['server_count_total'] += 1
                 entry = {}
@@ -324,7 +331,9 @@ class ZoneChecker:
 
     def check_dnskey(self, entry):
         """Check DNSKEY at a single nameserver address"""
-        msg, err = get_response(self.name, dns.rdatatype.DNSKEY, entry['ip'])
+        msg, err = get_response(self.name, dns.rdatatype.DNSKEY, entry['ip'],
+                                timeout=self.config.timeout, retries=self.config.retries,
+                                payload=self.config.bufsize, nsid=self.config.nsid)
         if err:
             entry['dnssec'] = False
             entry['error'] = err
@@ -333,7 +342,7 @@ class ZoneChecker:
         dnskey_set, dnskey_sig = get_rrset_and_signature(msg,
                                                          self.name,
                                                          dns.rdatatype.DNSKEY)
-        if CONFIG.nsid:
+        if self.config.nsid:
             for option in msg.options:
                 if option.otype == dns.edns.NSID:
                     entry['nsid'] = option.nsid.decode()
@@ -348,7 +357,7 @@ class ZoneChecker:
             return False
         try:
             keylist, ksklist = check_self_signature(dnskey_set, dnskey_sig)
-            if CONFIG.verbose:
+            if self.config.verbose:
                 entry['dnskey'] = [str(x) for x in keylist]
                 entry['ksk'] = [str(x) for x in ksklist]
         except ResError as err:
@@ -360,14 +369,16 @@ class ZoneChecker:
             entry['dnssec'] = False
             entry['error'] = "DS did not match any DNSKEY"
             return False
-        if CONFIG.verbose:
+        if self.config.verbose:
             entry['dsmatch'] = ds_match_list
         key_cache.install(self.name, load_keys(dnskey_set)[0])
         return True
 
     def check_record(self, entry):
         """Check data record at single nameserver address"""
-        msg, err = get_response(self.recname, self.rectype, entry['ip'])
+        msg, err = get_response(self.recname, self.rectype, entry['ip'],
+                                timeout=self.config.timeout, retries=self.config.retries,
+                                payload=self.config.bufsize, nsid=self.config.nsid)
         if err:
             entry['dnssec'] = False
             entry['error'] = err
@@ -377,14 +388,14 @@ class ZoneChecker:
             entry['dnssec'] = False
             entry['error'] = "Non existent record"
             return
-        if CONFIG.verbose:
+        if self.config.verbose:
             entry['record'] = {}
             entry['record']['rdataset'] = [str(x) for x in rec_set]
         if not rec_sig:
             entry['dnssec'] = False
             entry['error'] = "Missing record signature"
             return
-        if CONFIG.verbose:
+        if self.config.verbose:
             entry['record']['sigs'] = [str(x) for x in rec_sig]
         try:
             verified, failed = validate_all(rec_set, rec_sig)
@@ -398,20 +409,20 @@ class ZoneChecker:
         else:
             entry['dnssec'] = True
             self.result['server_count_good'] += 1
-            if CONFIG.verbose:
+            if self.config.verbose:
                 entry['record']['signer'] = [str(x) for x in verified]
 
     def return_status(self):
         """Return status as a JSON string"""
         percent = 100.0 * self.result['server_count_good'] / self.result['server_count_total']
         self.result['server_good_percent'] = "{:.2f}".format(percent)
-        if percent >= CONFIG.percent_ok:
+        if percent >= self.config.percent_ok:
             self.result["success"] = True
         return json.dumps(self.result, indent=2)
 
     def print_status(self):
         """Print Status"""
-        if CONFIG.text:
+        if self.config.text:
             for entry in self.result['servers']:
                 prefix = "DNSSEC SUCCESS" if entry['dnssec'] else "DNSSEC FAILED"
                 print(prefix, entry['nsname'], entry['ip'],
@@ -423,14 +434,10 @@ class ZoneChecker:
 if __name__ == '__main__':
 
     CONFIG = process_arguments()
-    ZONENAME = dns.name.from_text(CONFIG.zone)
-    RECNAME = dns.name.from_text(CONFIG.recname)
-    RECTYPE = dns.rdatatype.from_text(CONFIG.rectype)
-
     Prefs.DNSSEC = True
     initialize_dnssec()
 
-    CHECKER = ZoneChecker(ZONENAME, RECNAME, RECTYPE, dsdata=CONFIG.dsdata)
+    CHECKER = ZoneChecker(CONFIG.zone, CONFIG.recname, CONFIG.rectype, config=CONFIG)
     CHECKER.check_nameservers()
     CHECKER.print_status()
     if CHECKER.result['success']:
