@@ -43,7 +43,7 @@ from reslib.dnssec import key_cache, load_keys, validate_all
 from reslib.lookup import initialize_dnssec, resolve_name
 
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
@@ -345,7 +345,10 @@ class ZoneChecker:
         if self.config.nsid:
             for option in msg.options:
                 if option.otype == dns.edns.NSID:
-                    entry['nsid'] = option.nsid.decode()
+                    try:
+                        entry['nsid'] = option.nsid.decode()
+                    except AttributeError:
+                        entry['nsid'] = option.data.decode()
 
         if not dnskey_set:
             entry['dnssec'] = False

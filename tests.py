@@ -11,6 +11,9 @@ from reslib.prefs import Prefs
 from reslib.lookup import initialize_dnssec
 from check_zone_dnssec import ZoneChecker, process_arguments
 
+def get_checker_status(checker):
+    """Get status of Checker class"""
+    return json.loads(checker.return_status())
 
 class TestZoneChecker(unittest.TestCase):
 
@@ -27,8 +30,8 @@ class TestZoneChecker(unittest.TestCase):
         checker = ZoneChecker(config.zone, config.recname, config.rectype,
                               config=config)
         checker.check_nameservers()
-        status = json.loads(checker.return_status())
-        self.assertEqual(status['success'], True, 'Incorrect test')
+        status = get_checker_status(checker)
+        self.assertTrue(status['success'], 'Incorrect test')
 
 
 if __name__ == '__main__':

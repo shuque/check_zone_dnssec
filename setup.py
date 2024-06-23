@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="check_zone_dnssec",
-    version="1.0.1",
+    version="1.0.2",
     author="Shumon Huque",
     author_email="shuque@gmail.com",
     description="Check DNSSEC at all nameservers for a zone",

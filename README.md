@@ -60,7 +60,7 @@ usage: check_zone_dnssec.py [-h] [-v] [--percent_ok N] [-4 | -6] [--bufsize N]
                             [--retries N]
                             zone recname rectype
 
-Version 1.0.1
+Version 1.0.2
 Query all nameserver addresses for a given zone and validate DNSSEC
 
 positional arguments:
