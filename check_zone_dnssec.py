@@ -320,9 +320,10 @@ class ZoneChecker:
             alist = get_addresses(self.resolver, nsname, self.config.ip_rrtypes)
             for nsaddress in alist:
                 self.result['server_count_total'] += 1
-                entry = {}
-                entry['nsname'] = nsname.to_text()
-                entry['ip'] = nsaddress
+                entry = {
+                    'nsname': nsname.to_text(),
+                    'ip': nsaddress
+                }
                 if not self.check_dnskey(entry):
                     self.result['servers'].append(entry)
                     continue
@@ -418,7 +419,7 @@ class ZoneChecker:
     def return_status(self):
         """Return status as a JSON string"""
         percent = 100.0 * self.result['server_count_good'] / self.result['server_count_total']
-        self.result['server_good_percent'] = "{:.2f}".format(percent)
+        self.result['server_good_percent'] = f"{percent:.2f}"
         if percent >= self.config.percent_ok:
             self.result["success"] = True
         return json.dumps(self.result, indent=2)
