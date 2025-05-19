@@ -18,6 +18,10 @@ on that set, matches the DS RRset to the KSKs. It then queries the
 specified record name and type within the zone and authenticates its
 signature.
 
+Optionally, the program can be told to query specific additional
+nameserver names or addresses not published in the NS RRset for the
+zone, or even omit querying the NS RRSet entirely.
+
 This program is useful for checking that _every_ authoritative server
 for a target zone is responding with correctly signed answers.
 
@@ -43,7 +47,7 @@ from reslib.dnssec import key_cache, load_keys, validate_all
 from reslib.lookup import initialize_dnssec, resolve_name
 
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
@@ -99,6 +103,13 @@ def process_arguments(arguments=None):
     parser.add_argument("--bufsize", type=int, metavar='N',
                         default=DEFAULT_EDNS_BUFSIZE,
                         help="Set EDNS buffer size in octets (default: %(default)d)")
+    parser.add_argument("--addnsname", dest='nsnames', default=None,
+                        help="Additional NS names to query (comma separated)")
+    parser.add_argument("--addnsip", dest='nsips', default=None,
+                        help="Additional NS IP addresses to query (comma separated)")
+    parser.add_argument("--nonsquery", dest='nonsquery', action='store_true',
+                        default=False,
+                        help="Don't query zone's NS set (default: %(default)s)")
     parser.add_argument("--nsid", dest='nsid', action='store_true',
                         default=DEFAULT_NSID,
                         help="Send and record NSID EDNS option")
@@ -222,7 +233,10 @@ def get_addresses(resolver, name, ip_rrtypes):
 
     address_list = []
     for rrtype in ip_rrtypes:
-        msg = resolver.resolve(name, rrtype).response
+        try:
+            msg = resolver.resolve(name, rrtype).response
+        except dns.resolver.NoAnswer:
+            continue
         rrset = msg.get_rrset(msg.answer, name, dns.rdataclass.IN, rrtype)
         for entry in rrset.to_rdataset():
             address_list.append(entry.address)
@@ -278,7 +292,8 @@ class ZoneChecker:
     """Zone class"""
 
     result = {}              # result dictionary
-    nslist = None            # list of nameserver names
+    nslist = []              # list of nameserver names
+    iplist = []              # list of additional nameserver IP addresses
 
     def __init__(self, zonename, recname, rectype, config):
         self.name = zonename
@@ -292,6 +307,7 @@ class ZoneChecker:
         else:
             self.dsdata = get_ds_data_from_dns(self.name)
         self.get_nameservers()
+        self.get_additonal_ips()
         self.timestamp = None
         self.init_result()
 
@@ -311,7 +327,16 @@ class ZoneChecker:
 
     def get_nameservers(self):
         """Obtain nameserver list"""
-        self.nslist = get_ns_list(self.resolver, self.name)
+        if not self.config.nonsquery:
+            self.nslist = get_ns_list(self.resolver, self.name)
+        if self.config.nsnames:
+            additional = [dns.name.from_text(x) for x in self.config.nsnames.split(',')]
+            self.nslist.extend(additional)
+
+    def get_additonal_ips(self):
+        """Obtain addtional IP addresses to check"""
+        if self.config.nsips:
+            self.iplist = self.config.nsips.split(',')
 
     def check_nameservers(self):
         """Check nameservers"""
@@ -320,15 +345,23 @@ class ZoneChecker:
             alist = get_addresses(self.resolver, nsname, self.config.ip_rrtypes)
             for nsaddress in alist:
                 self.result['server_count_total'] += 1
-                entry = {
-                    'nsname': nsname.to_text(),
-                    'ip': nsaddress
-                }
-                if not self.check_dnskey(entry):
-                    self.result['servers'].append(entry)
-                    continue
-                self.check_record(entry)
-                self.result['servers'].append(entry)
+                self.check_single_nameserver(nsname.to_text(), nsaddress)
+        if self.iplist:
+            for nsaddress in self.iplist:
+                self.result['server_count_total'] += 1
+                self.check_single_nameserver('Unspecified', nsaddress)
+
+    def check_single_nameserver(self, nsname, nsip):
+        """Check single nameserver entry"""
+        entry = {
+            'nsname': nsname,
+            'ip': nsip
+        }
+        if not self.check_dnskey(entry):
+            self.result['servers'].append(entry)
+        else:
+            self.check_record(entry)
+            self.result['servers'].append(entry)
 
     def check_dnskey(self, entry):
         """Check DNSKEY at a single nameserver address"""
