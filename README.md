@@ -51,7 +51,7 @@ Install resolve:
 
 Install check_zone_dnssec.py:
 
-* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.3
+* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.5
 
 
 ### Usage
@@ -65,7 +65,7 @@ usage: check_zone_dnssec.py [-h] [-v] [--percent_ok N] [-4 | -6] [--bufsize N]
                             [--retries N]
                             zone recname rectype
 
-Version 1.0.4
+Version 1.0.5
 Query all nameserver addresses for a given zone and validate DNSSEC
 
 positional arguments:

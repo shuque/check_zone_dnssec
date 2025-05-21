@@ -47,7 +47,7 @@ from reslib.dnssec import key_cache, load_keys, validate_all
 from reslib.lookup import initialize_dnssec, resolve_name
 
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
