@@ -47,7 +47,7 @@ from reslib.dnssec import key_cache, load_keys, validate_all
 from reslib.lookup import initialize_dnssec, resolve_name
 
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
@@ -228,27 +228,40 @@ def get_ns_list(resolver, zone):
     ns_list = [x.target for x in rrset.to_rdataset()]
     return sorted(ns_list)
 
+
+def get_addresses_for_type(resolver, rrname, rrtype):
+    """Get addresses of rrtype for rrname, chasing CNAMEs if needed"""
+
+    address_list = []
+    sname = rrname
+    while True:
+        try:
+            msg = resolver.resolve(sname, rrtype).response
+        except dns.resolver.NoAnswer:
+            break
+        rrset = msg.get_rrset(msg.answer, sname, dns.rdataclass.IN, rrtype)
+        if rrset is None:
+            rrset = msg.get_rrset(msg.answer, sname,
+                                  dns.rdataclass.IN,
+                                  dns.rdatatype.CNAME)
+            if rrset is None:
+                break
+            sname = rrset.to_rdataset()[0].target
+            continue
+        for entry in rrset.to_rdataset():
+            address_list.append(entry.address)
+        break
+    return address_list
+
+
 def get_addresses(resolver, name, ip_rrtypes):
     """Get list of addresses for given domain name"""
 
     address_list = []
     for rrtype in ip_rrtypes:
-        sname = name
-        while True:
-            try:
-                msg = resolver.resolve(sname, rrtype).response
-            except dns.resolver.NoAnswer:
-                break
-            rrset = msg.get_rrset(msg.answer, sname, dns.rdataclass.IN, rrtype)
-            if rrset is None:
-                rrset = msg.get_rrset(msg.answer, sname,
-                                      dns.rdataclass.IN,
-                                      dns.rdatatype.CNAME)
-                sname = rrset.to_rdataset()[0].target
-                continue
-            for entry in rrset.to_rdataset():
-                address_list.append(entry.address)
-            break
+        addresses = get_addresses_for_type(resolver, name, rrtype)
+        if addresses:
+            address_list.extend(addresses)
     return address_list
 
 
@@ -360,6 +373,16 @@ class ZoneChecker:
                     'ip': None,
                     'dnssec': False,
                     'error': "NXDOMAIN"
+                }
+                self.result['servers'].append(entry)
+                continue
+            if not alist:
+                self.result['server_count_total'] += 1
+                entry = {
+                    'nsname': nsname.to_text(),
+                    'ip': None,
+                    'dnssec': False,
+                    'error': "No addresses found"
                 }
                 self.result['servers'].append(entry)
                 continue
