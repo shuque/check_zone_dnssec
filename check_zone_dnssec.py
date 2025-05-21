@@ -233,13 +233,22 @@ def get_addresses(resolver, name, ip_rrtypes):
 
     address_list = []
     for rrtype in ip_rrtypes:
-        try:
-            msg = resolver.resolve(name, rrtype).response
-        except dns.resolver.NoAnswer:
-            continue
-        rrset = msg.get_rrset(msg.answer, name, dns.rdataclass.IN, rrtype)
-        for entry in rrset.to_rdataset():
-            address_list.append(entry.address)
+        sname = name
+        while True:
+            try:
+                msg = resolver.resolve(sname, rrtype).response
+            except dns.resolver.NoAnswer:
+                break
+            rrset = msg.get_rrset(msg.answer, sname, dns.rdataclass.IN, rrtype)
+            if rrset is None:
+                rrset = msg.get_rrset(msg.answer, sname,
+                                      dns.rdataclass.IN,
+                                      dns.rdatatype.CNAME)
+                sname = rrset.to_rdataset()[0].target
+                continue
+            for entry in rrset.to_rdataset():
+                address_list.append(entry.address)
+            break
     return address_list
 
 
@@ -342,7 +351,18 @@ class ZoneChecker:
         """Check nameservers"""
         self.result['timestamp'] = time.strftime("%Y-%m-%dT%H:%M:%S%Z", time.gmtime(time.time()))
         for nsname in self.nslist:
-            alist = get_addresses(self.resolver, nsname, self.config.ip_rrtypes)
+            try:
+                alist = get_addresses(self.resolver, nsname, self.config.ip_rrtypes)
+            except dns.resolver.NXDOMAIN:
+                self.result['server_count_total'] += 1
+                entry = {
+                    'nsname': nsname.to_text(),
+                    'ip': None,
+                    'dnssec': False,
+                    'error': "NXDOMAIN"
+                }
+                self.result['servers'].append(entry)
+                continue
             for nsaddress in alist:
                 self.result['server_count_total'] += 1
                 self.check_single_nameserver(nsname.to_text(), nsaddress)
