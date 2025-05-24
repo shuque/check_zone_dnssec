@@ -37,21 +37,9 @@ Pre-requisites:
 
 ### Installation
 
-Install the pre-requisite python cryptography package:
-
-* pip3 install "cryptography>=3.0"
-
-Install the dnspython package:
-
-* pip3 install dnspython
-
-Install resolve:
-
-* pip3 install git+https://github.com/shuque/resolve.git@v0.6.6
-
 Install check_zone_dnssec.py:
 
-* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.6
+* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.7
 
 
 ### Usage
@@ -65,7 +53,7 @@ usage: check_zone_dnssec.py [-h] [-v] [--percent_ok N] [-4 | -6] [--bufsize N]
                             [--retries N]
                             zone recname rectype
 
-Version 1.0.6
+Version 1.0.7
 Query all nameserver addresses for a given zone and validate DNSSEC
 
 positional arguments:
