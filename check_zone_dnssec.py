@@ -44,10 +44,10 @@ from reslib.query import Query
 from reslib.exception import ResError
 from reslib.dnssec import check_self_signature, ds_rr_matches_dnskey
 from reslib.dnssec import key_cache, load_keys, validate_all
-from reslib.lookup import initialize_dnssec, resolve_name
+from reslib.lookup import initialize_dnssec, resolve_name, authenticate_nxdomain
 
 
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
@@ -88,6 +88,9 @@ def process_arguments(arguments=None):
 
     parser.add_argument("-v", "--verbose", action="count", default=0,
                         help="increase output verbosity")
+    parser.add_argument("--rcode", type=dns.rcode.from_text, metavar='RCODE',
+                        default=dns.rcode.NOERROR,
+                        help="Expected response code (default: NOERROR)")
     parser.add_argument("--percent_ok", type=int, metavar='N',
                         default=DEFAULT_PERCENT_OK,
                         help="Percentage success threshold (default: %(default)d)")
@@ -322,6 +325,7 @@ class ZoneChecker:
         self.recname = recname
         self.rectype = rectype
         self.config = config
+        self.query = Query(recname, rectype, 'IN')
         self.resolver = get_resolver(addresses=config.resolvers, dnssec_ok=False,
                                      timeout=config.timeout, payload=config.bufsize)
         if config.dsdata:
@@ -459,10 +463,25 @@ class ZoneChecker:
         msg, err = get_response(self.recname, self.rectype, entry['ip'],
                                 timeout=self.config.timeout, retries=self.config.retries,
                                 payload=self.config.bufsize, nsid=self.config.nsid)
+        if msg.rcode() != self.config.rcode:
+            rcode = dns.rcode.to_text(msg.rcode())
+            entry['dnssec'] = False
+            entry['error'] = f"Unexpected rcode: {rcode}"
+            return
+
         if err:
             entry['dnssec'] = False
             entry['error'] = err
             return
+
+        if msg.rcode() == dns.rcode.NXDOMAIN:
+            self.check_record_nxdomain(entry, msg)
+            return
+
+        self.check_record_noerror(entry, msg)
+
+    def check_record_noerror(self, entry, msg):
+        """Check NOERROR response for data record at single nameserver"""
         rec_set, rec_sig = get_rrset_and_signature(msg, self.recname, self.rectype)
         if not rec_set:
             entry['dnssec'] = False
@@ -491,6 +510,16 @@ class ZoneChecker:
             self.result['server_count_good'] += 1
             if self.config.verbose:
                 entry['record']['signer'] = [str(x) for x in verified]
+
+    def check_record_nxdomain(self, entry, msg):
+        """Check NXDOMAIN response for data record at single nameserver"""
+        self.query.response = msg
+        authenticate_nxdomain(self.query)
+        if self.query.is_secure():
+            entry['dnssec'] = True
+            self.result['server_count_good'] += 1
+        else:
+            entry['dnssec'] = False
 
     def return_status(self):
         """Return status as a JSON string"""

@@ -39,21 +39,21 @@ Pre-requisites:
 
 Install check_zone_dnssec.py:
 
-* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.7
+* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.8
 
 
 ### Usage
 
 ```
 $ check_zone_dnssec.py -h
-usage: check_zone_dnssec.py [-h] [-v] [--percent_ok N] [-4 | -6] [--bufsize N]
-                            [--addnsname NSNAMES] [--addnsip NSIPS]
-                            [--nonsquery] [--nsid] [--dsdata DSDATA]
-                            [--resolvers IP [IP ...]] [--text] [--timeout N]
-                            [--retries N]
+usage: check_zone_dnssec.py [-h] [-v] [--rcode RCODE] [--percent_ok N]
+                            [-4 | -6] [--bufsize N] [--addnsname NSNAMES]
+                            [--addnsip NSIPS] [--nonsquery] [--nsid]
+                            [--dsdata DSDATA] [--resolvers IP [IP ...]]
+                            [--text] [--timeout N] [--retries N]
                             zone recname rectype
 
-Version 1.0.7
+Version 1.0.8
 Query all nameserver addresses for a given zone and validate DNSSEC
 
 positional arguments:
@@ -64,6 +64,7 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -v, --verbose         increase output verbosity
+  --rcode RCODE         Expected response code (default: NOERROR)
   --percent_ok N        Percentage success threshold (default: 100)
   -4                    Query IPv4 nameserver addresses only
   -6                    Query IPv6 nameserver addresses only
