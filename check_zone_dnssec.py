@@ -44,10 +44,11 @@ from reslib.query import Query
 from reslib.exception import ResError
 from reslib.dnssec import check_self_signature, ds_rr_matches_dnskey
 from reslib.dnssec import key_cache, load_keys, validate_all
-from reslib.lookup import initialize_dnssec, resolve_name, authenticate_nxdomain
+from reslib.lookup import initialize_dnssec, resolve_name, \
+    authenticate_nxdomain, authenticate_nodata
 
 
-__version__ = "1.0.8"
+__version__ = "1.0.9"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
@@ -88,9 +89,15 @@ def process_arguments(arguments=None):
 
     parser.add_argument("-v", "--verbose", action="count", default=0,
                         help="increase output verbosity")
-    parser.add_argument("--rcode", type=dns.rcode.from_text, metavar='RCODE',
-                        default=dns.rcode.NOERROR,
-                        help="Expected response code (default: NOERROR)")
+
+    resp_type = parser.add_mutually_exclusive_group()
+    resp_type.add_argument("--nxdomain", dest='nxdomain', action='store_true',
+                           default=False,
+                           help="Expect NXDOMAIN response")
+    resp_type.add_argument("--nodata", dest='nodata', action='store_true',
+                           default=False,
+                           help="Expect NODATA response")
+
     parser.add_argument("--percent_ok", type=int, metavar='N',
                         default=DEFAULT_PERCENT_OK,
                         help="Percentage success threshold (default: %(default)d)")
@@ -316,15 +323,14 @@ def ds_rrset_matches_ksk_set(ds_set, ksk_set):
 class ZoneChecker:
     """Zone class"""
 
-    result = {}              # result dictionary
-    nslist = []              # list of nameserver names
-    iplist = []              # list of additional nameserver IP addresses
-
     def __init__(self, zonename, recname, rectype, config):
         self.name = zonename
         self.recname = recname
         self.rectype = rectype
         self.config = config
+        self.result = {}              # result dictionary
+        self.nslist = []              # list of nameserver names
+        self.iplist = []              # additional nameserver addresses
         self.query = Query(recname, rectype, 'IN')
         self.resolver = get_resolver(addresses=config.resolvers, dnssec_ok=False,
                                      timeout=config.timeout, payload=config.bufsize)
@@ -463,7 +469,13 @@ class ZoneChecker:
         msg, err = get_response(self.recname, self.rectype, entry['ip'],
                                 timeout=self.config.timeout, retries=self.config.retries,
                                 payload=self.config.bufsize, nsid=self.config.nsid)
-        if msg.rcode() != self.config.rcode:
+        if self.config.nxdomain and (msg.rcode() != dns.rcode.NXDOMAIN):
+            rcode = dns.rcode.to_text(msg.rcode())
+            entry['dnssec'] = False
+            entry['error'] = f"Unexpected rcode: {rcode}"
+            return
+
+        if (not self.config.nxdomain) and (msg.rcode() != dns.rcode.NOERROR):
             rcode = dns.rcode.to_text(msg.rcode())
             entry['dnssec'] = False
             entry['error'] = f"Unexpected rcode: {rcode}"
@@ -474,8 +486,12 @@ class ZoneChecker:
             entry['error'] = err
             return
 
-        if msg.rcode() == dns.rcode.NXDOMAIN:
+        if self.config.nxdomain:
             self.check_record_nxdomain(entry, msg)
+            return
+
+        if self.config.nodata:
+            self.check_record_nodata(entry, msg)
             return
 
         self.check_record_noerror(entry, msg)
@@ -515,6 +531,16 @@ class ZoneChecker:
         """Check NXDOMAIN response for data record at single nameserver"""
         self.query.response = msg
         authenticate_nxdomain(self.query)
+        if self.query.is_secure():
+            entry['dnssec'] = True
+            self.result['server_count_good'] += 1
+        else:
+            entry['dnssec'] = False
+
+    def check_record_nodata(self, entry, msg):
+        """Check NODATA response for data record at single nameserver"""
+        self.query.response = msg
+        authenticate_nodata(self.query)
         if self.query.is_secure():
             entry['dnssec'] = True
             self.result['server_count_good'] += 1

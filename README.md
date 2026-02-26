@@ -2,7 +2,7 @@
 Check DNSSEC at all nameservers for a zone
 
 check_zone_dnssec.py
-A command line too to verify DNSSEC reponses at each authoritative
+A command line tool to verify DNSSEC reponses at each authoritative
 server for a signed zone.
 
 Query each nameserver address for a zone and determine whether
@@ -25,8 +25,8 @@ Optionally, the program can be told to query specific additional
 nameserver names or addresses not published in the NS RRset for the 
 zone, or even omit querying the NS RRSet entirely.
 
-The --rcode option can be used to test that signed NXDOMAIN responses
-are correct.
+The --nxdomain and --nodata options can be used to test signed NXDOMAIN
+and NODATA responses respectively.
 
 This program is useful for checking that _every_ authoritative server
 for a target zone is responding with correctly signed answers.
@@ -42,21 +42,20 @@ Pre-requisites:
 
 Install check_zone_dnssec.py:
 
-* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.8
+* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.9
 
 
 ### Usage
 
 ```
-$ check_zone_dnssec.py -h
-usage: check_zone_dnssec.py [-h] [-v] [--rcode RCODE] [--percent_ok N]
+usage: check_zone_dnssec.py [-h] [-v] [--nxdomain | --nodata] [--percent_ok N]
                             [-4 | -6] [--bufsize N] [--addnsname NSNAMES]
                             [--addnsip NSIPS] [--nonsquery] [--nsid]
                             [--dsdata DSDATA] [--resolvers IP [IP ...]]
                             [--text] [--timeout N] [--retries N]
                             zone recname rectype
 
-Version 1.0.8
+Version 1.0.9
 Query all nameserver addresses for a given zone and validate DNSSEC
 
 positional arguments:
@@ -64,10 +63,11 @@ positional arguments:
   recname               Record name in the zone
   rectype               Record type for that name
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -v, --verbose         increase output verbosity
-  --rcode RCODE         Expected response code (default: NOERROR)
+  --nxdomain            Expect NXDOMAIN response
+  --nodata              Expect NODATA response
   --percent_ok N        Percentage success threshold (default: 100)
   -4                    Query IPv4 nameserver addresses only
   -6                    Query IPv6 nameserver addresses only
@@ -171,7 +171,7 @@ Check the signed NXDOMAIN responses for the non-existent domain
 'foo.nxd79.huque.com' at the huque.com zone:
 
 ```
-$ check_zone_dnssec.py --rcode NXDOMAIN huque.com foo.nxd79.huque.com A
+$ check_zone_dnssec.py --nxdomain huque.com foo.nxd79.huque.com A
 {
   "zone": "huque.com.",
   "recname": "foo.nxd79.huque.com.",
