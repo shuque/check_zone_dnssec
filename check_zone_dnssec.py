@@ -570,6 +570,10 @@ if __name__ == '__main__':
 
     CONFIG = process_arguments()
     Prefs.DNSSEC = True
+    if CONFIG.ip_rrtypes == [dns.rdatatype.A]:
+        Prefs.V4_ONLY = True
+    elif CONFIG.ip_rrtypes == [dns.rdatatype.AAAA]:
+        Prefs.V6_ONLY = True
     initialize_dnssec()
 
     CHECKER = ZoneChecker(CONFIG.zone, CONFIG.recname, CONFIG.rectype, config=CONFIG)
