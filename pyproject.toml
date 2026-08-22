@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
     "cryptography>=3.0",
     "dnspython>=2.6.0",
-    "resolve @ git+https://github.com/shuque/resolve.git@v0.6.7",
+    "resolve @ git+https://github.com/shuque/resolve.git@v0.10.5",
 ]
 
 [project.urls]

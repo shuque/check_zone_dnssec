@@ -39,16 +39,16 @@ import dns.edns
 import dns.exception
 
 from reslib.prefs import Prefs
-from reslib.cache import RootZone
+from reslib.resolver import Resolver
 from reslib.query import Query
 from reslib.exception import ResError
 from reslib.dnssec import check_self_signature, ds_rr_matches_dnskey
-from reslib.dnssec import key_cache, load_keys, validate_all
-from reslib.lookup import initialize_dnssec, resolve_name, \
+from reslib.dnssec import load_keys, validate_all
+from reslib.lookup import resolve_name, \
     authenticate_nxdomain, authenticate_nodata
 
 
-__version__ = "1.0.10"
+__version__ = "1.0.11"
 __description__ = f"""\
 Version {__version__}
 Query all nameserver addresses for a given zone and validate DNSSEC"""
@@ -199,13 +199,13 @@ def get_resolver(addresses=None, dnssec_ok=False, timeout=DEFAULT_TIMEOUT,
     return res
 
 
-def get_ds_data_from_dns(zone):
+def get_ds_data_from_dns(engine, zone):
     """
     Get secured DS recordset data from the DNS. Returns a dns.rrset.RRset class.
     """
 
-    query = Query(zone, 'DS', 'IN')
-    resolve_name(query, RootZone, addResults=query)
+    query = Query(zone, 'DS', 'IN', resolver=engine)
+    resolve_name(engine, query, engine.root_zone, addResults=query)
     if not query.is_secure():
         raise ValueError(f'{zone}/DS returned insecure answer')
     for entry in query.full_answer_rrset:
@@ -309,13 +309,13 @@ def get_rrset_and_signature(message, rrname, rrtype):
     return rrset, rrsig
 
 
-def ds_rrset_matches_ksk_set(ds_set, ksk_set):
+def ds_rrset_matches_ksk_set(engine, ds_set, ksk_set):
     """Return list of DS record and matching DNSKEY pairs"""
 
     match_list = []
     for ds_rdata in ds_set:
         for key in ksk_set:
-            if key.zone_flag and ds_rr_matches_dnskey(ds_rdata, key):
+            if key.zone_flag and ds_rr_matches_dnskey(engine, ds_rdata, key):
                 match_list.append([str(ds_rdata), str(key)])
     return match_list
 
@@ -323,21 +323,22 @@ def ds_rrset_matches_ksk_set(ds_set, ksk_set):
 class ZoneChecker:
     """Zone class"""
 
-    def __init__(self, zonename, recname, rectype, config):
+    def __init__(self, zonename, recname, rectype, config, engine):
         self.name = zonename
         self.recname = recname
         self.rectype = rectype
         self.config = config
+        self.engine = engine          # reslib Resolver (DNSSEC engine)
         self.result = {}              # result dictionary
         self.nslist = []              # list of nameserver names
         self.iplist = []              # additional nameserver addresses
-        self.query = Query(recname, rectype, 'IN')
+        self.query = Query(recname, rectype, 'IN', resolver=engine)
         self.resolver = get_resolver(addresses=config.resolvers, dnssec_ok=False,
                                      timeout=config.timeout, payload=config.bufsize)
         if config.dsdata:
             self.dsdata = get_ds_data_from_string(zonename, config.dsdata)
         else:
-            self.dsdata = get_ds_data_from_dns(self.name)
+            self.dsdata = get_ds_data_from_dns(self.engine, self.name)
         self.get_nameservers()
         self.get_additonal_ips()
         self.timestamp = None
@@ -446,7 +447,7 @@ class ZoneChecker:
             entry['error'] = "Missing DNSKEY signature"
             return False
         try:
-            keylist, ksklist = check_self_signature(dnskey_set, dnskey_sig)
+            keylist, ksklist = check_self_signature(self.engine, dnskey_set, dnskey_sig)
             if self.config.verbose:
                 entry['dnskey'] = [str(x) for x in keylist]
                 entry['ksk'] = [str(x) for x in ksklist]
@@ -454,14 +455,14 @@ class ZoneChecker:
             entry['dnssec'] = False
             entry['error'] = str(err)
             return False
-        ds_match_list = ds_rrset_matches_ksk_set(self.dsdata, ksklist)
+        ds_match_list = ds_rrset_matches_ksk_set(self.engine, self.dsdata, ksklist)
         if not ds_match_list:
             entry['dnssec'] = False
             entry['error'] = "DS did not match any DNSKEY"
             return False
         if self.config.verbose:
             entry['dsmatch'] = ds_match_list
-        key_cache.install(self.name, load_keys(dnskey_set)[0])
+        self.engine.key_cache.install(self.name, load_keys(dnskey_set)[0])
         return True
 
     def check_record(self, entry):
@@ -513,7 +514,7 @@ class ZoneChecker:
         if self.config.verbose:
             entry['record']['sigs'] = [str(x) for x in rec_sig]
         try:
-            verified, failed = validate_all(rec_set, rec_sig)
+            verified, failed = validate_all(self.engine, rec_set, rec_sig)
         except ResError as err:
             entry['dnssec'] = False
             entry['error'] = str(err)
@@ -569,14 +570,17 @@ class ZoneChecker:
 if __name__ == '__main__':
 
     CONFIG = process_arguments()
-    Prefs.DNSSEC = True
+    PREFS = Prefs()
+    PREFS.DNSSEC = True
     if CONFIG.ip_rrtypes == [dns.rdatatype.A]:
-        Prefs.V4_ONLY = True
+        PREFS.V4_ONLY = True
     elif CONFIG.ip_rrtypes == [dns.rdatatype.AAAA]:
-        Prefs.V6_ONLY = True
-    initialize_dnssec()
+        PREFS.V6_ONLY = True
+    ENGINE = Resolver(prefs=PREFS)
+    ENGINE.bootstrap()
 
-    CHECKER = ZoneChecker(CONFIG.zone, CONFIG.recname, CONFIG.rectype, config=CONFIG)
+    CHECKER = ZoneChecker(CONFIG.zone, CONFIG.recname, CONFIG.rectype,
+                          config=CONFIG, engine=ENGINE)
     CHECKER.check_nameservers()
     CHECKER.print_status()
     if CHECKER.result['success']:

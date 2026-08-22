@@ -90,7 +90,8 @@ def make_checker(config=None, **config_overrides):
             dns.name.from_text('ns1.example.com.'),
             dns.name.from_text('ns2.example.com.'),
         ]
-        checker = ZoneChecker(zone, recname, rectype, config=config)
+        checker = ZoneChecker(zone, recname, rectype, config=config,
+                              engine=MagicMock())
     return checker
 
 
@@ -325,7 +326,7 @@ class TestGetDsDataFromDns(unittest.TestCase):
         mock_entry.rrset = mock_rrset
         mock_query.full_answer_rrset = [mock_entry]
 
-        result = get_ds_data_from_dns(zone)
+        result = get_ds_data_from_dns(MagicMock(), zone)
         self.assertIs(result, mock_rrset)
 
     @patch('check_zone_dnssec.resolve_name')
@@ -336,7 +337,7 @@ class TestGetDsDataFromDns(unittest.TestCase):
         mock_query.is_secure.return_value = False
 
         with self.assertRaises(ValueError) as ctx:
-            get_ds_data_from_dns(zone)
+            get_ds_data_from_dns(MagicMock(), zone)
         self.assertIn('insecure', str(ctx.exception))
 
     @patch('check_zone_dnssec.resolve_name')
@@ -352,7 +353,7 @@ class TestGetDsDataFromDns(unittest.TestCase):
         mock_query.full_answer_rrset = [other_entry]
 
         with self.assertRaises(ValueError) as ctx:
-            get_ds_data_from_dns(zone)
+            get_ds_data_from_dns(MagicMock(), zone)
         self.assertIn('not found', str(ctx.exception))
 
 
@@ -554,7 +555,7 @@ class TestDsRrsetMatchesKskSet(unittest.TestCase):
         mock_match.return_value = True
         ds_rdata = MagicMock()
         ksk = MagicMock(zone_flag=True)
-        result = ds_rrset_matches_ksk_set([ds_rdata], [ksk])
+        result = ds_rrset_matches_ksk_set(MagicMock(), [ds_rdata], [ksk])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], [str(ds_rdata), str(ksk)])
 
@@ -563,7 +564,7 @@ class TestDsRrsetMatchesKskSet(unittest.TestCase):
         mock_match.return_value = False
         ds_rdata = MagicMock()
         ksk = MagicMock(zone_flag=True)
-        result = ds_rrset_matches_ksk_set([ds_rdata], [ksk])
+        result = ds_rrset_matches_ksk_set(MagicMock(), [ds_rdata], [ksk])
         self.assertEqual(result, [])
 
     @patch('check_zone_dnssec.ds_rr_matches_dnskey')
@@ -572,7 +573,7 @@ class TestDsRrsetMatchesKskSet(unittest.TestCase):
         mock_match.return_value = True
         ds_rdata = MagicMock()
         ksk = MagicMock(zone_flag=False)
-        result = ds_rrset_matches_ksk_set([ds_rdata], [ksk])
+        result = ds_rrset_matches_ksk_set(MagicMock(), [ds_rdata], [ksk])
         self.assertEqual(result, [])
         mock_match.assert_not_called()
 
@@ -602,7 +603,8 @@ class TestZoneCheckerInit(unittest.TestCase):
         mock_ds_str.return_value = MagicMock()
         config = make_config(dsdata='370 13 2 AABB')
         zone = dns.name.from_text('example.com.')
-        ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config)
+        ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config,
+                              engine=MagicMock())
         mock_ds_str.assert_called_once()
         mock_ds_dns.assert_not_called()
 
@@ -613,7 +615,8 @@ class TestZoneCheckerInit(unittest.TestCase):
         mock_ds_dns.return_value = MagicMock()
         config = make_config(dsdata=None)
         zone = dns.name.from_text('example.com.')
-        ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config)
+        ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config,
+                              engine=MagicMock())
         mock_ds_dns.assert_called_once()
 
     @patch('check_zone_dnssec.get_ds_data_from_dns')
@@ -623,7 +626,8 @@ class TestZoneCheckerInit(unittest.TestCase):
         mock_ds.return_value = MagicMock()
         config = make_config(nsnames='ns3.example.com,ns4.example.com')
         zone = dns.name.from_text('example.com.')
-        checker = ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config)
+        checker = ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config,
+                              engine=MagicMock())
         names = [n.to_text() for n in checker.nslist]
         self.assertIn('ns3.example.com.', names)
         self.assertIn('ns4.example.com.', names)
@@ -635,7 +639,8 @@ class TestZoneCheckerInit(unittest.TestCase):
         mock_ds.return_value = MagicMock()
         config = make_config(nsips='192.0.2.50,192.0.2.51')
         zone = dns.name.from_text('example.com.')
-        checker = ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config)
+        checker = ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config,
+                              engine=MagicMock())
         self.assertEqual(checker.iplist, ['192.0.2.50', '192.0.2.51'])
 
     @patch('check_zone_dnssec.get_ds_data_from_dns')
@@ -644,7 +649,8 @@ class TestZoneCheckerInit(unittest.TestCase):
         mock_ds.return_value = MagicMock()
         config = make_config(nonsquery=True)
         zone = dns.name.from_text('example.com.')
-        checker = ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config)
+        checker = ZoneChecker(zone, zone, dns.rdatatype.SOA, config=config,
+                              engine=MagicMock())
         mock_ns.assert_not_called()
         self.assertEqual(checker.nslist, [])
 

@@ -42,7 +42,7 @@ Pre-requisites:
 
 Install check_zone_dnssec.py:
 
-* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.10
+* pip3 install git+https://github.com/shuque/check_zone_dnssec.git@v1.0.11
 
 
 ### Usage
